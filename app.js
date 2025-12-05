@@ -7,7 +7,7 @@ let updateInterval = null;
 let weatherFetchInterval = null;
 
 // OpenWeatherMap API key - get your free key at https://openweathermap.org/api
-const WEATHER_API_KEY = 'YOUR_API_KEY_HERE';
+const WEATHER_API_KEY = 'f021a3fc34dd1d322df919d299a246c6';
 
 // Current environmental data
 let currentData = {
@@ -51,17 +51,20 @@ async function toggleAudio() {
 
 async function startAudio() {
     try {
-        // Request location permission
+        // Start audio engine FIRST (iOS requires this from direct user tap)
+        statusEl.textContent = 'Starting audio...';
+        statusEl.classList.add('active');
+        await audioEngine.start();
+        
+        // Request location permission AFTER audio is initialized
         if (!navigator.geolocation) {
             alert('Geolocation not supported by your browser');
+            audioEngine.stop();
+            statusEl.classList.remove('active');
             return;
         }
         
-        statusEl.textContent = 'Starting...';
-        statusEl.classList.add('active');
-        
-        // Start audio engine
-        await audioEngine.start();
+        statusEl.textContent = 'Getting location...';
         
         // Start location tracking
         locationWatchId = navigator.geolocation.watchPosition(
