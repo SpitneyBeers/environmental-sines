@@ -3,11 +3,20 @@ class EnvironmentalAudioEngine {
         this.audioContext = null;
         this.oscillators = [];
         this.gainNodes = [];
+        this.convolver = null;
+        this.masterGain = null;
         this.isRunning = false;
         
         // Base frequencies for each octave (A notes)
         this.baseFrequencies = [55, 110, 220, 440, 880, 1760, 3520, 7040];
         this.currentFrequencies = [...this.baseFrequencies];
+        
+        // Individual volume levels (softer overall, varied per oscillator)
+        this.oscillatorVolumes = [0.03, 0.03, 0.02, 0.025, 0.015, 0.02, 0.01, 0.008];
+        
+        // Intermittent oscillators (A6 and A8)
+        this.intermittentOscillators = [5, 7]; // Indices for A6 and A8
+        this.intermittentTimers = [];
         
         // Environmental parameters
         this.latitude = 0;
@@ -30,7 +39,26 @@ class EnvironmentalAudioEngine {
             await this.audioContext.resume();
         }
         
-        // Create 8 oscillators with gain nodes
+        // Additional iOS fix - force resume again after a tiny delay
+        setTimeout(() => {
+            if (this.audioContext && this.audioContext.state === 'suspended') {
+                this.audioContext.resume();
+            }
+        }, 100);
+        
+        // Create reverb
+        this.convolver = this.audioContext.createConvolver();
+        this.convolver.buffer = this.createReverbImpulse();
+        
+        // Create master gain for overall volume control
+        this.masterGain = this.audioContext.createGain();
+        this.masterGain.gain.value = 0.6; // Master volume
+        
+        // Connect reverb -> master gain -> destination
+        this.convolver.connect(this.masterGain);
+        this.masterGain.connect(this.audioContext.destination);
+        
+        // Create 8 oscillators with individual gain nodes
         for (let i = 0; i < 8; i++) {
             const oscillator = this.audioContext.createOscillator();
             const gainNode = this.audioContext.createGain();
@@ -38,11 +66,13 @@ class EnvironmentalAudioEngine {
             oscillator.type = 'sine';
             oscillator.frequency.value = this.baseFrequencies[i];
             
-            // Set volume (8% per oscillator to avoid clipping)
-            gainNode.gain.value = 0.08;
+            // Set individual volume per oscillator
+            const isIntermittent = this.intermittentOscillators.includes(i);
+            gainNode.gain.value = isIntermittent ? 0 : this.oscillatorVolumes[i];
             
+            // Connect oscillator -> gain -> reverb
             oscillator.connect(gainNode);
-            gainNode.connect(this.audioContext.destination);
+            gainNode.connect(this.convolver);
             
             oscillator.start();
             
@@ -52,10 +82,91 @@ class EnvironmentalAudioEngine {
         
         this.isRunning = true;
         this.updateFrequencies();
+        
+        // Start intermittent behavior for A6 and A8
+        this.startIntermittentOscillators();
+    }
+    
+    createReverbImpulse() {
+        // Create a reverb impulse response (simulates room acoustics)
+        const sampleRate = this.audioContext.sampleRate;
+        const length = sampleRate * 3; // 3 second reverb
+        const impulse = this.audioContext.createBuffer(2, length, sampleRate);
+        
+        for (let channel = 0; channel < 2; channel++) {
+            const channelData = impulse.getChannelData(channel);
+            for (let i = 0; i < length; i++) {
+                // Exponential decay with some randomness
+                const decay = Math.pow(1 - i / length, 2);
+                channelData[i] = (Math.random() * 2 - 1) * decay;
+            }
+        }
+        
+        return impulse;
+    }
+    
+    startIntermittentOscillators() {
+        // A6 (index 5): Pulse on/off every 8-15 seconds
+        const startA6Timer = () => {
+            const interval = 8000 + Math.random() * 7000; // 8-15 seconds
+            const duration = 2000 + Math.random() * 4000; // 2-6 seconds on
+            
+            const timer = setTimeout(() => {
+                this.fadeIn(5, 0.5); // Fade in over 0.5s
+                setTimeout(() => {
+                    this.fadeOut(5, 1.0); // Fade out over 1s
+                    startA6Timer(); // Schedule next pulse
+                }, duration);
+            }, interval);
+            
+            this.intermittentTimers.push(timer);
+        };
+        
+        // A8 (index 7): Pulse on/off every 10-20 seconds
+        const startA8Timer = () => {
+            const interval = 10000 + Math.random() * 10000; // 10-20 seconds
+            const duration = 1000 + Math.random() * 3000; // 1-4 seconds on
+            
+            const timer = setTimeout(() => {
+                this.fadeIn(7, 0.3); // Fade in over 0.3s
+                setTimeout(() => {
+                    this.fadeOut(7, 0.8); // Fade out over 0.8s
+                    startA8Timer(); // Schedule next pulse
+                }, duration);
+            }, interval);
+            
+            this.intermittentTimers.push(timer);
+        };
+        
+        // Start the timers
+        startA6Timer();
+        startA8Timer();
+    }
+    
+    fadeIn(oscIndex, duration) {
+        if (!this.isRunning || !this.gainNodes[oscIndex]) return;
+        const now = this.audioContext.currentTime;
+        const gainNode = this.gainNodes[oscIndex];
+        gainNode.gain.cancelScheduledValues(now);
+        gainNode.gain.setValueAtTime(0, now);
+        gainNode.gain.linearRampToValueAtTime(this.oscillatorVolumes[oscIndex], now + duration);
+    }
+    
+    fadeOut(oscIndex, duration) {
+        if (!this.isRunning || !this.gainNodes[oscIndex]) return;
+        const now = this.audioContext.currentTime;
+        const gainNode = this.gainNodes[oscIndex];
+        gainNode.gain.cancelScheduledValues(now);
+        gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+        gainNode.gain.linearRampToValueAtTime(0, now + duration);
     }
     
     stop() {
         if (!this.isRunning) return;
+        
+        // Clear intermittent timers
+        this.intermittentTimers.forEach(timer => clearTimeout(timer));
+        this.intermittentTimers = [];
         
         // Stop all oscillators
         this.oscillators.forEach(osc => {
@@ -73,6 +184,8 @@ class EnvironmentalAudioEngine {
         
         this.oscillators = [];
         this.gainNodes = [];
+        this.convolver = null;
+        this.masterGain = null;
         this.audioContext = null;
         this.isRunning = false;
     }
