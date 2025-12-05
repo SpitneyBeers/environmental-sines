@@ -1,0 +1,165 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    background: #000;
+    color: #fff;
+    line-height: 1.6;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.container {
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 20px;
+    padding-bottom: 100px;
+}
+
+h1 {
+    text-align: center;
+    margin: 20px 0 10px 0;
+    font-size: 24px;
+    font-weight: 300;
+}
+
+h2 {
+    font-size: 14px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 12px;
+    color: #888;
+}
+
+.status {
+    text-align: center;
+    padding: 10px;
+    margin: 10px 0 20px 0;
+    background: #111;
+    border-radius: 8px;
+    font-size: 14px;
+    color: #888;
+}
+
+.panel {
+    background: #111;
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+}
+
+.data-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid #222;
+}
+
+.data-row:last-child {
+    border-bottom: none;
+}
+
+.label {
+    color: #888;
+    font-size: 14px;
+}
+
+.value {
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    color: #fff;
+}
+
+.freq-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.freq-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+}
+
+.freq-label {
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    color: #888;
+    width: 100px;
+}
+
+.freq-value {
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    color: #0f0;
+    text-align: right;
+}
+
+.btn {
+    width: 100%;
+    padding: 18px;
+    font-size: 18px;
+    font-weight: 600;
+    border: none;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-top: 20px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.btn-start {
+    background: #0a0;
+    color: #000;
+}
+
+.btn-stop {
+    background: #a00;
+    color: #fff;
+}
+
+.btn:active {
+    transform: scale(0.98);
+}
+
+.footer {
+    text-align: center;
+    margin-top: 30px;
+    padding-top: 20px;
+    border-top: 1px solid #222;
+}
+
+.footer p {
+    font-size: 12px;
+    color: #555;
+}
+
+/* iOS specific adjustments */
+@supports (-webkit-touch-callout: none) {
+    body {
+        -webkit-user-select: none;
+        user-select: none;
+    }
+    
+    .container {
+        padding-bottom: 120px;
+    }
+}
+
+/* Animations */
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+.status.active {
+    background: #0a0;
+    color: #000;
+    animation: pulse 2s infinite;
+}

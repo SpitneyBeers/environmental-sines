@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <title>Environmental Sines</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Environmental Sines</h1>
+        
+        <div class="status" id="status">Tap Start to begin</div>
+        
+        <div class="panel">
+            <h2>Location</h2>
+            <div class="data-row">
+                <span class="label">Latitude:</span>
+                <span class="value" id="lat">--</span>
+            </div>
+            <div class="data-row">
+                <span class="label">Longitude:</span>
+                <span class="value" id="lon">--</span>
+            </div>
+            <div class="data-row">
+                <span class="label">Speed:</span>
+                <span class="value" id="speed">--</span>
+            </div>
+        </div>
+        
+        <div class="panel">
+            <h2>Environment</h2>
+            <div class="data-row">
+                <span class="label">Temperature:</span>
+                <span class="value" id="temp">--</span>
+            </div>
+            <div class="data-row">
+                <span class="label">Weather:</span>
+                <span class="value" id="weather">--</span>
+            </div>
+            <div class="data-row">
+                <span class="label">Time:</span>
+                <span class="value" id="time">--</span>
+            </div>
+        </div>
+        
+        <div class="panel">
+            <h2>Frequencies</h2>
+            <div class="freq-grid">
+                <div class="freq-row">
+                    <span class="freq-label">A1 (Low)</span>
+                    <span class="freq-value" id="freq0">--</span>
+                </div>
+                <div class="freq-row">
+                    <span class="freq-label">A2</span>
+                    <span class="freq-value" id="freq1">--</span>
+                </div>
+                <div class="freq-row">
+                    <span class="freq-label">A3</span>
+                    <span class="freq-value" id="freq2">--</span>
+                </div>
+                <div class="freq-row">
+                    <span class="freq-label">A4 (Mid)</span>
+                    <span class="freq-value" id="freq3">--</span>
+                </div>
+                <div class="freq-row">
+                    <span class="freq-label">A5</span>
+                    <span class="freq-value" id="freq4">--</span>
+                </div>
+                <div class="freq-row">
+                    <span class="freq-label">A6</span>
+                    <span class="freq-value" id="freq5">--</span>
+                </div>
+                <div class="freq-row">
+                    <span class="freq-label">A7</span>
+                    <span class="freq-value" id="freq6">--</span>
+                </div>
+                <div class="freq-row">
+                    <span class="freq-label">A8 (High)</span>
+                    <span class="freq-value" id="freq7">--</span>
+                </div>
+            </div>
+        </div>
+        
+        <button id="toggleBtn" class="btn btn-start">Start</button>
+        
+        <div class="footer">
+            <p>Works best on iPhone with location enabled</p>
+        </div>
+    </div>
+    
+    <script src="audio-engine.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
