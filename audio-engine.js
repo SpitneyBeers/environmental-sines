@@ -5,25 +5,32 @@ class EnvironmentalAudioEngine {
         this.gainNodes = [];
         this.convolver = null;
         this.masterGain = null;
+        this.dryGain = null;
+        this.wetGain = null;
+        this.lowPassFilter = null;
+        this.highPassFilter = null;
         this.isRunning = false;
         
-        // Base frequencies for each octave (A notes)
-        this.baseFrequencies = [55, 110, 220, 440, 880, 1760, 3520, 7040];
-        this.currentFrequencies = [...this.baseFrequencies];
+        // Fundamental frequency based on sun position
+        this.fundamentalFreq = 200;
         
-        // Individual volume levels (softer overall, varied per oscillator)
-        this.oscillatorVolumes = [0.03, 0.03, 0.02, 0.025, 0.015, 0.02, 0.01, 0.008];
-        
-        // Intermittent oscillators (A6 and A8)
-        this.intermittentOscillators = [5, 7]; // Indices for A6 and A8
-        this.intermittentTimers = [];
+        // All 8 oscillators are now sporadic
+        this.sporadicTimers = [];
         
         // Environmental parameters
         this.latitude = 0;
         this.longitude = 0;
         this.speed = 0; // meters per second
         this.temperature = 20;
-        this.timeOfDay = 0.5; // 0.0 = midnight, 0.5 = noon, 1.0 = midnight
+        this.humidity = 50; // percentage
+        this.heading = 0; // compass heading in degrees (0 = North)
+        this.timeOfDay = 0.5;
+        
+        // Sun position
+        this.sunElevation = 0; // degrees above horizon
+        
+        // Vibrato/tremolo LFOs
+        this.vibratoLFOs = [];
         
         this.onFrequencyUpdate = null;
     }
@@ -31,15 +38,14 @@ class EnvironmentalAudioEngine {
     async start() {
         if (this.isRunning) return;
         
-        // Create audio context (must be after user interaction on iOS)
+        // Create audio context
         this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
         
-        // Resume context if suspended (iOS requirement)
+        // Resume context if suspended (iOS)
         if (this.audioContext.state === 'suspended') {
             await this.audioContext.resume();
         }
         
-        // Additional iOS fix - force resume again after a tiny delay
         setTimeout(() => {
             if (this.audioContext && this.audioContext.state === 'suspended') {
                 this.audioContext.resume();
@@ -50,29 +56,66 @@ class EnvironmentalAudioEngine {
         this.convolver = this.audioContext.createConvolver();
         this.convolver.buffer = this.createReverbImpulse();
         
-        // Create master gain for overall volume control
-        this.masterGain = this.audioContext.createGain();
-        this.masterGain.gain.value = 0.6; // Master volume
+        // Create dry/wet mix for reverb (controlled by humidity)
+        this.dryGain = this.audioContext.createGain();
+        this.wetGain = this.audioContext.createGain();
+        this.dryGain.gain.value = 0.7; // Default 70% dry
+        this.wetGain.gain.value = 0.3; // Default 30% wet
         
-        // Connect reverb -> master gain -> destination
+        // Create filters for fundamental (controlled by lat/lon)
+        this.lowPassFilter = this.audioContext.createBiquadFilter();
+        this.lowPassFilter.type = 'lowpass';
+        this.lowPassFilter.frequency.value = 5000;
+        
+        this.highPassFilter = this.audioContext.createBiquadFilter();
+        this.highPassFilter.type = 'highpass';
+        this.highPassFilter.frequency.value = 100;
+        
+        // Master gain
+        this.masterGain = this.audioContext.createGain();
+        this.masterGain.gain.value = 0.8;
+        
+        // Audio chain: oscillators -> gains -> (filters for fund, direct for harmonics) -> dry/wet -> master -> destination
+        this.dryGain.connect(this.masterGain);
+        this.wetGain.connect(this.convolver);
         this.convolver.connect(this.masterGain);
         this.masterGain.connect(this.audioContext.destination);
         
-        // Create 8 oscillators with individual gain nodes
+        // Create 8 oscillators (1 fundamental + 7 harmonics)
         for (let i = 0; i < 8; i++) {
             const oscillator = this.audioContext.createOscillator();
             const gainNode = this.audioContext.createGain();
             
+            // Create vibrato LFO for each oscillator
+            const lfo = this.audioContext.createOscillator();
+            const lfoGain = this.audioContext.createGain();
+            lfo.frequency.value = 5 + Math.random() * 3; // 5-8 Hz vibrato rate
+            lfoGain.gain.value = 0; // Will be controlled by speed
+            
+            lfo.connect(lfoGain);
+            lfoGain.connect(oscillator.frequency);
+            lfo.start();
+            
+            this.vibratoLFOs.push({ lfo, lfoGain });
+            
             oscillator.type = 'sine';
-            oscillator.frequency.value = this.baseFrequencies[i];
+            oscillator.frequency.value = 200;
             
-            // Set individual volume per oscillator
-            const isIntermittent = this.intermittentOscillators.includes(i);
-            gainNode.gain.value = isIntermittent ? 0 : this.oscillatorVolumes[i];
+            // Start at 0 volume (sporadic)
+            gainNode.gain.value = 0;
             
-            // Connect oscillator -> gain -> reverb
             oscillator.connect(gainNode);
-            gainNode.connect(this.convolver);
+            
+            // Fundamental (osc 0) goes through filters, harmonics bypass filters
+            if (i === 0) {
+                gainNode.connect(this.highPassFilter);
+                this.highPassFilter.connect(this.lowPassFilter);
+                this.lowPassFilter.connect(this.dryGain);
+                this.lowPassFilter.connect(this.wetGain);
+            } else {
+                gainNode.connect(this.dryGain);
+                gainNode.connect(this.wetGain);
+            }
             
             oscillator.start();
             
@@ -83,21 +126,19 @@ class EnvironmentalAudioEngine {
         this.isRunning = true;
         this.updateFrequencies();
         
-        // Start intermittent behavior for A6 and A8
-        this.startIntermittentOscillators();
+        // Start sporadic behavior for ALL oscillators
+        this.startSporadicOscillators();
     }
     
     createReverbImpulse() {
-        // Create a reverb impulse response (simulates room acoustics)
         const sampleRate = this.audioContext.sampleRate;
-        const length = sampleRate * 3; // 3 second reverb
+        const length = sampleRate * 3.5;
         const impulse = this.audioContext.createBuffer(2, length, sampleRate);
         
         for (let channel = 0; channel < 2; channel++) {
             const channelData = impulse.getChannelData(channel);
             for (let i = 0; i < length; i++) {
-                // Exponential decay with some randomness
-                const decay = Math.pow(1 - i / length, 2);
+                const decay = Math.pow(1 - i / length, 2.5);
                 channelData[i] = (Math.random() * 2 - 1) * decay;
             }
         }
@@ -105,51 +146,46 @@ class EnvironmentalAudioEngine {
         return impulse;
     }
     
-    startIntermittentOscillators() {
-        // A6 (index 5): Pulse on/off every 8-15 seconds
-        const startA6Timer = () => {
-            const interval = 8000 + Math.random() * 7000; // 8-15 seconds
-            const duration = 2000 + Math.random() * 4000; // 2-6 seconds on
-            
-            const timer = setTimeout(() => {
-                this.fadeIn(5, 0.5); // Fade in over 0.5s
-                setTimeout(() => {
-                    this.fadeOut(5, 1.0); // Fade out over 1s
-                    startA6Timer(); // Schedule next pulse
-                }, duration);
-            }, interval);
-            
-            this.intermittentTimers.push(timer);
-        };
+    startSporadicOscillators() {
+        // Each oscillator pulses independently
+        // Max 16 seconds between pulses, min 3 seconds
+        // Duration 1-6 seconds
         
-        // A8 (index 7): Pulse on/off every 10-20 seconds
-        const startA8Timer = () => {
-            const interval = 10000 + Math.random() * 10000; // 10-20 seconds
-            const duration = 1000 + Math.random() * 3000; // 1-4 seconds on
-            
-            const timer = setTimeout(() => {
-                this.fadeIn(7, 0.3); // Fade in over 0.3s
-                setTimeout(() => {
-                    this.fadeOut(7, 0.8); // Fade out over 0.8s
-                    startA8Timer(); // Schedule next pulse
-                }, duration);
-            }, interval);
-            
-            this.intermittentTimers.push(timer);
-        };
-        
-        // Start the timers
-        startA6Timer();
-        startA8Timer();
+        for (let i = 0; i < 8; i++) {
+            this.scheduleSporadicPulse(i);
+        }
     }
     
-    fadeIn(oscIndex, duration) {
+    scheduleSporadicPulse(oscIndex) {
+        const interval = 3000 + Math.random() * 13000; // 3-16 seconds
+        const duration = 1000 + Math.random() * 5000; // 1-6 seconds
+        const fadeIn = 0.2 + Math.random() * 0.5; // 0.2-0.7s fade in
+        const fadeOut = 0.3 + Math.random() * 1.0; // 0.3-1.3s fade out
+        
+        const timer = setTimeout(() => {
+            if (!this.isRunning) return;
+            
+            this.fadeIn(oscIndex, fadeIn, 0.04); // Volume 0.04 per oscillator
+            
+            setTimeout(() => {
+                if (!this.isRunning) return;
+                this.fadeOut(oscIndex, fadeOut);
+                
+                // Schedule next pulse
+                this.scheduleSporadicPulse(oscIndex);
+            }, duration);
+        }, interval);
+        
+        this.sporadicTimers.push(timer);
+    }
+    
+    fadeIn(oscIndex, duration, targetVolume) {
         if (!this.isRunning || !this.gainNodes[oscIndex]) return;
         const now = this.audioContext.currentTime;
         const gainNode = this.gainNodes[oscIndex];
         gainNode.gain.cancelScheduledValues(now);
         gainNode.gain.setValueAtTime(0, now);
-        gainNode.gain.linearRampToValueAtTime(this.oscillatorVolumes[oscIndex], now + duration);
+        gainNode.gain.linearRampToValueAtTime(targetVolume, now + duration);
     }
     
     fadeOut(oscIndex, duration) {
@@ -164,20 +200,25 @@ class EnvironmentalAudioEngine {
     stop() {
         if (!this.isRunning) return;
         
-        // Clear intermittent timers
-        this.intermittentTimers.forEach(timer => clearTimeout(timer));
-        this.intermittentTimers = [];
+        // Clear sporadic timers
+        this.sporadicTimers.forEach(timer => clearTimeout(timer));
+        this.sporadicTimers = [];
         
-        // Stop all oscillators
+        // Stop LFOs
+        this.vibratoLFOs.forEach(({ lfo }) => {
+            try {
+                lfo.stop();
+            } catch (e) {}
+        });
+        this.vibratoLFOs = [];
+        
+        // Stop oscillators
         this.oscillators.forEach(osc => {
             try {
                 osc.stop();
-            } catch (e) {
-                // Already stopped
-            }
+            } catch (e) {}
         });
         
-        // Close audio context
         if (this.audioContext) {
             this.audioContext.close();
         }
@@ -186,74 +227,156 @@ class EnvironmentalAudioEngine {
         this.gainNodes = [];
         this.convolver = null;
         this.masterGain = null;
+        this.dryGain = null;
+        this.wetGain = null;
+        this.lowPassFilter = null;
+        this.highPassFilter = null;
         this.audioContext = null;
         this.isRunning = false;
     }
     
-    setEnvironmentalData(lat, lon, speed, temp, timeOfDay) {
+    setEnvironmentalData(lat, lon, speed, temp, humidity, heading, timeOfDay) {
         this.latitude = lat;
         this.longitude = lon;
         this.speed = speed;
         this.temperature = temp;
+        this.humidity = humidity;
+        this.heading = heading;
         this.timeOfDay = timeOfDay;
         
         this.updateFrequencies();
     }
     
+    calculateSunElevation() {
+        // Simplified sun elevation calculation
+        // Solar noon = 0.5, sunrise/sunset = 0 or 1
+        // This creates a sine wave peaking at noon
+        
+        const hourAngle = (this.timeOfDay - 0.5) * Math.PI * 2; // -π to π
+        const declination = 0; // Simplified (equinox)
+        const latRad = this.latitude * Math.PI / 180;
+        
+        // Solar elevation angle (simplified)
+        const elevation = Math.asin(
+            Math.sin(latRad) * Math.sin(declination) +
+            Math.cos(latRad) * Math.cos(declination) * Math.cos(hourAngle)
+        ) * 180 / Math.PI;
+        
+        return Math.max(-90, Math.min(90, elevation));
+    }
+    
     updateFrequencies() {
         if (!this.isRunning) return;
         
-        // Normalize environmental parameters
-        const latNorm = (this.latitude + 90) / 180; // 0 to 1
-        const lonNorm = (this.longitude + 180) / 360; // 0 to 1
-        const speedNorm = Math.min(this.speed / 30, 1); // Max at 30 m/s
-        const tempNorm = (this.temperature + 20) / 60; // -20°C to 40°C
+        // Calculate sun elevation
+        this.sunElevation = this.calculateSunElevation();
         
-        // Calculate frequencies for each oscillator
-        // A1 (55 Hz): Latitude - slow drift (±10% of base)
-        this.currentFrequencies[0] = this.baseFrequencies[0] * (0.9 + latNorm * 0.2);
+        // Map sun elevation to fundamental frequency
+        // Elevation -90° to 90°, but we care about -20° to 70° roughly
+        // Solar noon (high elevation) = 200Hz (low freq)
+        // Sunrise/sunset (low/negative elevation) = 4800Hz (high freq)
+        const elevationNorm = Math.max(-20, Math.min(70, this.sunElevation));
+        const elevationFactor = (elevationNorm + 20) / 90; // 0 to 1
         
-        // A2 (110 Hz): Longitude - slow drift (±10% of base)
-        this.currentFrequencies[1] = this.baseFrequencies[1] * (0.9 + lonNorm * 0.2);
+        // INVERTED: high elevation = low freq
+        this.fundamentalFreq = 4800 - (elevationFactor * 4600); // 4800 to 200
         
-        // A3 (220 Hz): Speed - more responsive (±20% of base)
-        this.currentFrequencies[2] = this.baseFrequencies[2] * (0.8 + speedNorm * 0.4);
+        // Temperature drift (hotter = more drift)
+        const tempDrift = (this.temperature - 20) * 0.5; // ±10Hz per 20°C deviation
+        const randomDrift = (Math.random() - 0.5) * Math.abs(tempDrift);
         
-        // A4 (440 Hz): Temperature - moderate drift (±15% of base)
-        this.currentFrequencies[3] = this.baseFrequencies[3] * (0.85 + tempNorm * 0.3);
+        // Get compass interval
+        const compassInterval = this.getCompassInterval();
         
-        // A5 (880 Hz): Time of day - cyclical (±15% of base)
-        this.currentFrequencies[4] = this.baseFrequencies[4] * (0.85 + this.timeOfDay * 0.3);
+        // Determine if we use multipliers (low fund) or divisors (high fund)
+        const useSubharmonics = this.fundamentalFreq > 2000;
         
-        // A6 (1760 Hz): Combined lat+speed (±25% of base)
-        const combo1 = (latNorm + speedNorm) / 2;
-        this.currentFrequencies[5] = this.baseFrequencies[5] * (0.75 + combo1 * 0.5);
+        // Set fundamental (oscillator 0)
+        const fund = this.fundamentalFreq + randomDrift;
+        this.setOscillatorFrequency(0, fund);
         
-        // A7 (3520 Hz): Combined lon+temp (±25% of base)
-        const combo2 = (lonNorm + tempNorm) / 2;
-        this.currentFrequencies[6] = this.baseFrequencies[6] * (0.75 + combo2 * 0.5);
+        // Set 7 harmonics using compass interval at different octaves
+        const intervals = useSubharmonics ? 
+            [0.5, 0.67, 0.33, 0.25, 0.4, 0.2, 0.125] : // Subharmonics (divisors)
+            [1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0];        // Harmonics (multipliers)
         
-        // A8 (7040 Hz): All combined (±30% of base)
-        const comboAll = (latNorm + lonNorm + speedNorm + tempNorm + this.timeOfDay) / 5;
-        this.currentFrequencies[7] = this.baseFrequencies[7] * (0.7 + comboAll * 0.6);
+        for (let i = 1; i < 8; i++) {
+            const harmonic = fund * compassInterval * intervals[i - 1];
+            this.setOscillatorFrequency(i, harmonic);
+        }
         
-        // Apply frequencies to oscillators with smooth ramping
-        this.oscillators.forEach((osc, i) => {
-            if (osc.frequency) {
-                // Use exponentialRampToValueAtTime for smooth transitions
-                const now = this.audioContext.currentTime;
-                osc.frequency.cancelScheduledValues(now);
-                osc.frequency.setValueAtTime(osc.frequency.value, now);
-                osc.frequency.exponentialRampToValueAtTime(
-                    Math.max(20, this.currentFrequencies[i]), // Clamp to valid range
-                    now + 0.1 // 100ms ramp
-                );
-            }
+        // Update vibrato/tremolo based on speed (INVERTED)
+        // Slow speed = more vibrato, fast speed = less
+        const speedNorm = Math.min(this.speed / 30, 1); // 0-30 m/s
+        const vibratoDepth = 5.5 - (speedNorm * 5); // 5.5Hz at 0 speed, 0.5Hz at max speed
+        
+        this.vibratoLFOs.forEach(({ lfoGain }) => {
+            lfoGain.gain.value = vibratoDepth;
         });
         
-        // Notify UI of frequency update
+        // Update filters based on lat/lon
+        // Higher latitude = lower low-pass cutoff
+        // Lower latitude = higher low-pass cutoff
+        const latNorm = (this.latitude + 90) / 180; // 0 to 1
+        const lowPassFreq = 500 + latNorm * 4500; // 500Hz to 5000Hz
+        this.lowPassFilter.frequency.value = lowPassFreq;
+        
+        // Longitude affects high-pass
+        const lonNorm = (this.longitude + 180) / 360; // 0 to 1
+        const highPassFreq = 50 + lonNorm * 450; // 50Hz to 500Hz
+        this.highPassFilter.frequency.value = highPassFreq;
+        
+        // Update reverb wet/dry based on humidity
+        const humidityNorm = this.humidity / 100; // 0 to 1
+        this.dryGain.gain.value = 0.9 - (humidityNorm * 0.5); // 0.9 to 0.4
+        this.wetGain.gain.value = 0.1 + (humidityNorm * 0.6); // 0.1 to 0.7
+        
+        // Notify UI
         if (this.onFrequencyUpdate) {
-            this.onFrequencyUpdate(this.currentFrequencies);
+            const freqs = this.oscillators.map(osc => osc.frequency.value);
+            this.onFrequencyUpdate(freqs);
         }
+    }
+    
+    getCompassInterval() {
+        // Map compass heading (0-360°) to musical intervals
+        // North (0°) = 1.5 (perfect 5th)
+        // East (90°) = 1.25 (major 3rd)
+        // South (180°) = 1.414 (tritone)
+        // West (270°) = 1.778 (minor 7th)
+        
+        const headingNorm = this.heading % 360;
+        
+        if (headingNorm < 90) {
+            // North to East: 1.5 to 1.25
+            const t = headingNorm / 90;
+            return 1.5 - (t * 0.25);
+        } else if (headingNorm < 180) {
+            // East to South: 1.25 to 1.414
+            const t = (headingNorm - 90) / 90;
+            return 1.25 + (t * 0.164);
+        } else if (headingNorm < 270) {
+            // South to West: 1.414 to 1.778
+            const t = (headingNorm - 180) / 90;
+            return 1.414 + (t * 0.364);
+        } else {
+            // West to North: 1.778 to 1.5
+            const t = (headingNorm - 270) / 90;
+            return 1.778 - (t * 0.278);
+        }
+    }
+    
+    setOscillatorFrequency(index, frequency) {
+        if (!this.oscillators[index]) return;
+        
+        const now = this.audioContext.currentTime;
+        const osc = this.oscillators[index];
+        
+        osc.frequency.cancelScheduledValues(now);
+        osc.frequency.setValueAtTime(osc.frequency.value, now);
+        osc.frequency.exponentialRampToValueAtTime(
+            Math.max(20, Math.min(20000, frequency)),
+            now + 0.1
+        );
     }
 }
