@@ -124,6 +124,12 @@ h2 {
     color: #fff;
 }
 
+.btn-compass {
+    background: #05a;
+    color: #fff;
+    margin-top: 10px;
+}
+
 .btn:active {
     transform: scale(0.98);
 }
