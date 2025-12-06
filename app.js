@@ -82,7 +82,24 @@ async function startAudio() {
         
         // Track device orientation for compass heading
         if (window.DeviceOrientationEvent) {
-            window.addEventListener('deviceorientation', onOrientationChange);
+            // iOS 13+ requires permission request
+            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission()
+                    .then(permissionState => {
+                        if (permissionState === 'granted') {
+                            window.addEventListener('deviceorientation', onOrientationChange);
+                        } else {
+                            console.log('Device orientation permission denied');
+                            headingEl.textContent = 'Permission denied';
+                        }
+                    })
+                    .catch(console.error);
+            } else {
+                // Non-iOS or older iOS - no permission needed
+                window.addEventListener('deviceorientation', onOrientationChange);
+            }
+        } else {
+            headingEl.textContent = 'Not supported';
         }
         
         // Update time of day every second
