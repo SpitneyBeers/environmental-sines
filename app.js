@@ -15,6 +15,8 @@ let currentData = {
     longitude: 0,
     speed: 0,
     temperature: 20,
+    humidity: 50,
+    heading: 0,
     weatherDescription: '',
     timeOfDay: 0.5
 };
@@ -25,6 +27,7 @@ const statusEl = document.getElementById('status');
 const latEl = document.getElementById('lat');
 const lonEl = document.getElementById('lon');
 const speedEl = document.getElementById('speed');
+const headingEl = document.getElementById('heading');
 const tempEl = document.getElementById('temp');
 const weatherEl = document.getElementById('weather');
 const timeEl = document.getElementById('time');
@@ -77,6 +80,11 @@ async function startAudio() {
             }
         );
         
+        // Track device orientation for compass heading
+        if (window.DeviceOrientationEvent) {
+            window.addEventListener('deviceorientation', onOrientationChange);
+        }
+        
         // Update time of day every second
         updateInterval = setInterval(updateTimeOfDay, 1000);
         
@@ -107,6 +115,11 @@ function stopAudio() {
     if (locationWatchId !== null) {
         navigator.geolocation.clearWatch(locationWatchId);
         locationWatchId = null;
+    }
+    
+    // Remove orientation listener
+    if (window.DeviceOrientationEvent) {
+        window.removeEventListener('deviceorientation', onOrientationChange);
     }
     
     // Stop intervals
@@ -157,6 +170,27 @@ function onLocationError(error) {
     }
 }
 
+function onOrientationChange(event) {
+    // Get compass heading
+    // alpha = compass heading (0-360, 0 = North)
+    // Need to handle both absolute and relative compass
+    let heading = event.webkitCompassHeading || event.alpha || 0;
+    
+    // Normalize to 0-360
+    if (heading < 0) heading += 360;
+    if (heading >= 360) heading -= 360;
+    
+    currentData.heading = heading;
+    
+    // Update UI
+    const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+    const dirIndex = Math.round(heading / 45) % 8;
+    headingEl.textContent = `${heading.toFixed(0)}° (${directions[dirIndex]})`;
+    
+    // Update audio engine
+    updateAudioEngine();
+}
+
 function updateTimeOfDay() {
     const now = new Date();
     const hours = now.getHours();
@@ -194,12 +228,14 @@ async function fetchWeather() {
         
         const data = await response.json();
         currentData.temperature = data.main.temp;
+        currentData.humidity = data.main.humidity; // Add humidity
         currentData.weatherDescription = data.weather[0].description;
         
         // Update UI
         tempEl.textContent = `${currentData.temperature.toFixed(1)}°C`;
         weatherEl.textContent = currentData.weatherDescription.charAt(0).toUpperCase() + 
-                               currentData.weatherDescription.slice(1);
+                               currentData.weatherDescription.slice(1) + 
+                               ` (${currentData.humidity}% humid)`;
         
         // Update audio engine
         updateAudioEngine();
@@ -216,6 +252,8 @@ function updateAudioEngine() {
         currentData.longitude,
         currentData.speed,
         currentData.temperature,
+        currentData.humidity,
+        currentData.heading,
         currentData.timeOfDay
     );
 }
