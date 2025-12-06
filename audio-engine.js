@@ -147,9 +147,8 @@ class EnvironmentalAudioEngine {
     }
     
     startSporadicOscillators() {
-        // Each oscillator pulses independently
-        // Max 16 seconds between pulses, min 3 seconds
-        // Duration 1-6 seconds
+        // Oscillators 0-3: Fixed timing (not speed-dependent)
+        // Oscillators 4-7: Pulse rate controlled by speed
         
         for (let i = 0; i < 8; i++) {
             this.scheduleSporadicPulse(i);
@@ -157,8 +156,26 @@ class EnvironmentalAudioEngine {
     }
     
     scheduleSporadicPulse(oscIndex) {
-        const interval = 3000 + Math.random() * 13000; // 3-16 seconds
-        const duration = 1000 + Math.random() * 5000; // 1-6 seconds
+        // Speed-dependent timing for oscillators 4-7
+        const isSpeedControlled = oscIndex >= 4;
+        
+        let interval, duration;
+        
+        if (isSpeedControlled) {
+            // Speed affects pulse frequency
+            // Slow (0 m/s) = 8-16 sec intervals (infrequent)
+            // Fast (35.8 m/s / 80 mph) = 1-4 sec intervals (rapid)
+            const speedNorm = Math.min(this.speed / 35.8, 1);
+            const minInterval = 8000 - (speedNorm * 7000); // 8s to 1s
+            const maxInterval = 16000 - (speedNorm * 12000); // 16s to 4s
+            interval = minInterval + Math.random() * (maxInterval - minInterval);
+        } else {
+            // Fixed timing for oscillators 0-3
+            interval = 3000 + Math.random() * 13000; // 3-16 seconds
+        }
+        
+        duration = 1000 + Math.random() * 5000; // 1-6 seconds (same for all)
+        
         const fadeIn = 0.2 + Math.random() * 0.5; // 0.2-0.7s fade in
         const fadeOut = 0.3 + Math.random() * 1.0; // 0.3-1.3s fade out
         
@@ -285,29 +302,46 @@ class EnvironmentalAudioEngine {
         const tempDrift = (this.temperature - 20) * 0.5; // ±10Hz per 20°C deviation
         const randomDrift = (Math.random() - 0.5) * Math.abs(tempDrift);
         
-        // Get compass interval
-        const compassInterval = this.getCompassInterval();
+        // Get compass chord (3-4 ratios depending on direction)
+        const compassChord = this.getCompassChord();
         
         // Determine if we use multipliers (low fund) or divisors (high fund)
         const useSubharmonics = this.fundamentalFreq > 2000;
         
-        // Set fundamental (oscillator 0)
+        // Set fundamental (oscillator 0) - always the root
         const fund = this.fundamentalFreq + randomDrift;
         this.setOscillatorFrequency(0, fund);
         
-        // Set 7 harmonics using compass interval at different octaves
-        const intervals = useSubharmonics ? 
-            [0.5, 0.67, 0.33, 0.25, 0.4, 0.2, 0.125] : // Subharmonics (divisors)
-            [1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0];        // Harmonics (multipliers)
+        // Oscillators 1, 2, 4, 5, 6, 7 = 6 chord tones
+        // We'll distribute the chord tones across octaves
+        const harmonicIndices = [1, 2, 4, 5, 6, 7];
         
-        for (let i = 1; i < 8; i++) {
-            const harmonic = fund * compassInterval * intervals[i - 1];
-            this.setOscillatorFrequency(i, harmonic);
-        }
+        harmonicIndices.forEach((oscIdx, i) => {
+            // Cycle through chord tones, doubling at octaves
+            const chordTone = compassChord[i % compassChord.length];
+            const octaveMultiplier = Math.floor(i / compassChord.length) + 1;
+            
+            let harmonic;
+            if (useSubharmonics) {
+                // High fundamental: use subharmonics (divide)
+                harmonic = fund / (chordTone * octaveMultiplier);
+            } else {
+                // Low fundamental: use harmonics (multiply)
+                harmonic = fund * chordTone * octaveMultiplier;
+            }
+            
+            this.setOscillatorFrequency(oscIdx, harmonic);
+        });
+        
+        // Oscillator 3: Direct speed control (independent of fundamental)
+        // Slow (0 m/s) = 100Hz, Fast (35.8 m/s / 80 mph) = 2000Hz
+        const speedNorm = Math.min(this.speed / 35.8, 1);
+        const speedFreq = 100 + (speedNorm * 1900);
+        this.setOscillatorFrequency(3, speedFreq);
         
         // Update vibrato/tremolo based on speed (INVERTED)
         // Slow speed = more vibrato, fast speed = less
-        const speedNorm = Math.min(this.speed / 30, 1); // 0-30 m/s
+        const speedNorm = Math.min(this.speed / 35.8, 1); // 0-35.8 m/s (80 mph)
         const vibratoDepth = 5.5 - (speedNorm * 5); // 5.5Hz at 0 speed, 0.5Hz at max speed
         
         this.vibratoLFOs.forEach(({ lfoGain }) => {
@@ -338,32 +372,57 @@ class EnvironmentalAudioEngine {
         }
     }
     
-    getCompassInterval() {
-        // Map compass heading (0-360°) to musical intervals
-        // North (0°) = 1.5 (perfect 5th)
-        // East (90°) = 1.25 (major 3rd)
-        // South (180°) = 1.414 (tritone)
-        // West (270°) = 1.778 (minor 7th)
+    getCompassChord() {
+        // Map compass heading (0-360°) to chord structures
+        // North (0°) = Major chord [1.0, 1.25, 1.5]
+        // East (90°) = Major 3rd chord [1.0, 1.25, 1.5625]
+        // South (180°) = Minor chord [1.0, 1.2, 1.5]
+        // West (270°) = Dominant 7th chord [1.0, 1.25, 1.5, 1.75]
         
         const headingNorm = this.heading % 360;
         
+        // Define chord structures (ratios from root)
+        const northChord = [1.0, 1.25, 1.5];           // Major: root, maj3, p5
+        const eastChord = [1.0, 1.25, 1.5625];         // Major 3rd: root, maj3, maj6
+        const southChord = [1.0, 1.2, 1.5];            // Minor: root, min3, p5
+        const westChord = [1.0, 1.25, 1.5, 1.75];      // Dom7: root, maj3, p5, min7
+        
+        let chord;
+        
         if (headingNorm < 90) {
-            // North to East: 1.5 to 1.25
+            // North to East (0° to 90°): Major → Major 3rd
             const t = headingNorm / 90;
-            return 1.5 - (t * 0.25);
+            chord = this.interpolateChords(northChord, eastChord, t);
         } else if (headingNorm < 180) {
-            // East to South: 1.25 to 1.414
+            // East to South (90° to 180°): Major 3rd → Minor
             const t = (headingNorm - 90) / 90;
-            return 1.25 + (t * 0.164);
+            chord = this.interpolateChords(eastChord, southChord, t);
         } else if (headingNorm < 270) {
-            // South to West: 1.414 to 1.778
+            // South to West (180° to 270°): Minor → Dom7
             const t = (headingNorm - 180) / 90;
-            return 1.414 + (t * 0.364);
+            chord = this.interpolateChords(southChord, westChord, t);
         } else {
-            // West to North: 1.778 to 1.5
+            // West to North (270° to 360°): Dom7 → Major
             const t = (headingNorm - 270) / 90;
-            return 1.778 - (t * 0.278);
+            chord = this.interpolateChords(westChord, northChord, t);
         }
+        
+        return chord;
+    }
+    
+    interpolateChords(chord1, chord2, t) {
+        // Interpolate between two chords
+        // Handle different chord lengths by padding with octaves
+        const maxLen = Math.max(chord1.length, chord2.length);
+        const c1 = [...chord1];
+        const c2 = [...chord2];
+        
+        // Pad shorter chord with octave doublings
+        while (c1.length < maxLen) c1.push(c1[c1.length - 1] * 2);
+        while (c2.length < maxLen) c2.push(c2[c2.length - 1] * 2);
+        
+        // Linear interpolation between ratios
+        return c1.map((val, i) => val + (c2[i] - val) * t);
     }
     
     setOscillatorFrequency(index, frequency) {
